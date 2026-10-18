@@ -1,0 +1,12 @@
+include LICENSE THIRD-PARTY-NOTICES.md README.md pyproject.toml zog-component.json
+recursive-include LICENSES *.txt
+recursive-include docs *
+recursive-include integration *
+recursive-include tests *.py
+recursive-include tools *.py
+recursive-include src *.py
+prune handoffs
+prune review
+prune integration/persistent-station
+exclude COPYRIGHT version-share-handoff.json integration/station-access.patch
+global-exclude *.pyc __pycache__ *.sqlite3 *.db

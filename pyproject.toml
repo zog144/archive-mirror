@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=80,<83"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Development/component packaging only. Public publication is the aggregate `zog` distribution.
+name = "archive-mirror"
+version = "0.4.2"
+requires-python = ">=3.12"
+license = "BSD-3-Clause OR GPL-3.0-only"
+license-files = ["LICENSE", "LICENSES/*.txt", "THIRD-PARTY-NOTICES.md"]
+dependencies = [
+  "Django>=5.2,<5.3",
+  "waitress>=3,<4",
+  "cryptography>=44",
+  "PyJWT>=2.10,<3",
+]
+
+[project.scripts]
+archive-mirror = "zog.archive_mirror.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["zog.archive_mirror*"]
+namespaces = true

@@ -1,0 +1,82 @@
+name: Public archive-mirror source checks
+
+on:
+  push:
+    branches: [unstable, main]
+  pull_request:
+    branches: [unstable, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: archive-mirror-source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-and-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, Node 24
+        with:
+          python-version: "3.12"
+      - name: Verify source boundary
+        run: python tools/public_source_preflight.py --root .
+      - name: Require ordinary non-root execution
+        run: |
+          test "$(id -u)" -ne 0
+          test "$(id -g)" -ne 0
+      - name: Checkout exact accepted public companion
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+        with:
+          repository: zog144/host-identify
+          ref: 1a5eac0b255c995022db6a3a4c0051efffa748cc
+          path: .ci-host-identify
+          persist-credentials: false
+      - name: Verify companion identity
+        run: test "$(git -C .ci-host-identify rev-parse HEAD)" = 1a5eac0b255c995022db6a3a4c0051efffa748cc
+      - name: Install bounded test tools and package dependencies
+        run: |
+          python -m pip install "build==1.6.1" "setuptools==82.0.1" "wheel==0.45.1" "pytest==8.4.2"
+          python -m pip install --no-build-isolation ./.ci-host-identify .
+          python -m pip check
+      - name: Compile source
+        env:
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/archive-mirror-pycache
+        run: python -m compileall -q src tests
+      - name: Test full isolated Django suite without skips
+        env:
+          DJANGO_SETTINGS_MODULE: tests.settings
+        run: |
+          python - <<'PY'
+          import os
+          import django
+          from django.test.runner import DiscoverRunner
+          assert os.geteuid() != 0 and os.getegid() != 0, "non-root runner required"
+          django.setup()
+          class NoSkippedTests(DiscoverRunner):
+              def suite_result(self, suite, result, **kwargs):
+                  return super().suite_result(suite, result, **kwargs) + len(result.skipped)
+          raise SystemExit(NoSkippedTests(verbosity=2).run_tests(["tests"]))
+          PY
+      - name: Test exact installed public companion
+        run: python -m pytest .ci-host-identify/tests -q -p no:cacheprovider
+      - name: Build from Git-indexed source in temporary directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/archive-mirror-source" "$RUNNER_TEMP/archive-mirror-dist"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/archive-mirror-source"
+          python -m build --no-isolation --outdir "$RUNNER_TEMP/archive-mirror-dist" "$RUNNER_TEMP/archive-mirror-source"
+      - name: Inspect artifacts before any upload
+        run: python tools/check_public_component_artifacts.py "$RUNNER_TEMP/archive-mirror-dist"
+
+# No cloud credentials, live registry/DNS, secrets, deployed provider,
+# production catalogue, privileged commands, artifact uploads or releases.
