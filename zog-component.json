@@ -1,0 +1,25 @@
+{
+  "schema": 2,
+  "program": "archive-mirror",
+  "python_package": "zog.archive_mirror",
+  "version": "0.4.2",
+  "scripts": {
+    "archive-mirror": "zog.archive_mirror.cli:main"
+  },
+  "component_dependencies": [
+    "host-identify"
+  ],
+  "external_dependencies": [
+    "Django>=5.2,<5.3",
+    "waitress>=3,<4",
+    "cryptography>=44",
+    "PyJWT>=2.10,<3"
+  ],
+  "package_data": [],
+  "license_notice_paths": [
+    "LICENSE",
+    "LICENSES/BSD-3-Clause.txt",
+    "LICENSES/GPL-3.0-only.txt",
+    "THIRD-PARTY-NOTICES.md"
+  ]
+}

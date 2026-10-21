@@ -1,0 +1,15 @@
+{
+  "root": "/var/lib/archive-mirror/store",
+  "collections": [
+    "sources",
+    "root-filesystems"
+  ],
+  "host_id": "00000000-0000-4000-8000-000000000001",
+  "intent_file": "/run/zog-host/mirror-live/mirror-intent.json",
+  "endpoint": "https://mirror.example.test",
+  "issuer": "https://registry.example.test",
+  "audience": "zog-archive-mirror",
+  "keyring": "/var/lib/archive-mirror/public-keyring.json",
+  "maximum_archive_bytes": 17179869184,
+  "sources": []
+}

@@ -1,0 +1,13 @@
+# Place inside the operator's HTTPS server block with its real certificate.
+# No public static alias may expose the archive store.
+location /collections/ {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header Authorization $http_authorization;
+    proxy_buffering off;
+}
+location = /.well-known/zog/archive-mirror/ready {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+}
+# Do not enable header/body logging. Standard access logs must omit Authorization.
