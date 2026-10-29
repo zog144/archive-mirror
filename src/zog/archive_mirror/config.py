@@ -14,6 +14,8 @@ def configuration():
     for name in value['collections']:
         if not isinstance(name,str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', name):
             raise ValueError('Invalid collection')
+    from .credentials import validate_configuration
+    validate_configuration(value)
     return value
 
 def collection(name):
