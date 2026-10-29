@@ -8,6 +8,7 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     sub.add_parser('migrate');sub.add_parser('refresh');sub.add_parser('prune');sub.add_parser('scheduler')
     cutover=sub.add_parser('cutover-evidence');cutover.add_argument('--root',required=True)
+    sub.add_parser('credential-inventory')
     serving=sub.add_parser('serve');serving.add_argument('--host',default='127.0.0.1');serving.add_argument('--port',type=int,default=8080)
     importing=sub.add_parser('import');importing.add_argument('path');importing.add_argument('--collection',required=True);importing.add_argument('--kind',choices=['source','root-filesystem'],required=True)
     reviewed=sub.add_parser('populate-sources');reviewed.add_argument('manifest')
@@ -77,6 +78,10 @@ def main():
         elif args.command=='cutover-evidence':
             from .cutover_evidence import collect
             print(json.dumps(collect(args.root),sort_keys=True))
+        elif args.command=='credential-inventory':
+            from .config import configuration
+            from .credentials import inventory
+            print(json.dumps(inventory(configuration()),sort_keys=True))
         elif args.command=='serve':
             from .runtime import server
             server(args.host,args.port)
