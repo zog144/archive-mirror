@@ -50,7 +50,8 @@ class ArchiveCredentialBoundaryTests(SimpleTestCase):
         )
         serialized=json.dumps(value)
         self.assertNotIn(str(self.root),serialized)
-        self.assertNotIn("private",serialized.lower().replace("private-key",""))
+        for secret in ("do-not-store","hidden","user:password"):
+            self.assertNotIn(secret,serialized)
 
     def test_secret_configuration_fields_are_rejected(self):
         attempts=[
