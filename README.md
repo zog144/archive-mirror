@@ -147,6 +147,10 @@ pruned in pass 1. Collection status exposes last attempt/success and sanitized e
 class; errors do not replace successful snapshots. No remote pin API exists yet:
 protect long-term build inputs administratively before relying on retention.
 
+## Credential provisioning boundary
+
+Archive bearer grants remain short-lived, scoped JWTs. Archive-mirror has no current durable archive-owned secret that should be provisioned cross-host, so the unified HTTPS credential framework has **zero enabled archive purposes** today; issuer signing keys never move to mirrors and current upstream acquisition remains credential-free. `archive-mirror credential-inventory` emits the bounded nonsecret inventory. See [credential provisioning](docs/archive-mirror/CREDENTIAL-PROVISIONING.md).
+
 ## HTTP and authorization
 
 - `GET /collections/COLLECTION/`: requires `list`, pages of 100, `?page=N`.

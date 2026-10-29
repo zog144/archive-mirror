@@ -1,21 +1,25 @@
 # Public host-identify companion review
 
-Archive-mirror 0.4.2 imports `zog.host_identify`. The private historical
-`version-share-handoff.json` selected `host-identify@4ea771766df606307769b5f56e22d06296440984`,
-but this commit does **not** exist in the new public host-identify repository.
-Do not carry that historical revision into the clean public source selector.
+Archive-mirror 0.4.2 imports `zog.host_identify`.
 
-A reachable public *candidate*, not yet approved by joint compatibility tests:
-`zog144/host-identify@1a5eac0b255c995022db6a3a4c0051efffa748cc`.
+The exact companion selected for the unified archive credential-boundary pass is:
 
-Before selecting it for installation:
-1. Verify its exact public Git tree and Python namespace.
-2. Run archive-mirror JWT, Ed25519, issuer/audience, lease, notice and negative
-   authorization tests against the exact installed public component.
-3. Prove unchanged fail-closed behavior for missing, expired and wrong-scope
-   credentials. Use a disposable SQLite database, isolated state and no live DNS.
-4. Record the tested version and source identity in the revised release selector,
-   never replace a pinned revision with a moving `unstable` reference.
+`zog144/host-identify@84f120888801d5c97100714fdb5562fb24e97254`
 
-Source-only publication does not imply that live enrollment, actual archive
-serving or host-controller compatibility has been independently accepted.
+This revision retains the existing archive JWT verifier and mirror-access
+semantics and adds the bounded `zog.host_identify.archive_credentials` policy
+registry. It enables **no** durable archive HTTPS credential purpose today.
+
+Joint compatibility requirements:
+
+1. install exactly the pinned public host-identify source;
+2. run archive-mirror JWT/Ed25519 issuer/audience/operation/collection tests;
+3. run role withdrawal, expiry, wrong-collection and Host-identity-change tests;
+4. verify the credential inventory exposes no token/private-key bytes and no
+   enabled common-HTTPS purpose;
+5. retain fail-closed mirror discovery and persistent archive preservation.
+
+The archive-mirror GitHub workflow checks out and verifies this exact companion
+SHA before running the full Django suite, then executes the companion's tests as
+well. A successful source CI run does not authorize live credential delivery,
+provider mutation, enrollment, DNS or production cutover.

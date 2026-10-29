@@ -39,11 +39,11 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
         with:
           repository: zog144/host-identify
-          ref: 1a5eac0b255c995022db6a3a4c0051efffa748cc
+          ref: 84f120888801d5c97100714fdb5562fb24e97254
           path: .ci-host-identify
           persist-credentials: false
       - name: Verify companion identity
-        run: test "$(git -C .ci-host-identify rev-parse HEAD)" = 1a5eac0b255c995022db6a3a4c0051efffa748cc
+        run: test "$(git -C .ci-host-identify rev-parse HEAD)" = 84f120888801d5c97100714fdb5562fb24e97254
       - name: Install bounded test tools and package dependencies
         run: |
           python -m pip install "build==1.6.1" "setuptools==82.0.1" "wheel==0.45.1" "pytest==8.4.2"
