@@ -70,7 +70,7 @@ def validate_configuration(value):
         raise ArchiveCredentialConfigurationError(
             "archive verification keyring must be an explicit public-key path"
         )
-    sources=value.get("sources")
+    sources=value.get("sources",[])
     if not isinstance(sources,list):
         raise ArchiveCredentialConfigurationError("sources must be a list")
     for source in sources:
