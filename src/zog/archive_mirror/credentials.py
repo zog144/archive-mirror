@@ -62,14 +62,17 @@ def validate_configuration(value):
     if not isinstance(value,dict) or set(value)-_ALLOWED_CONFIGURATION:
         raise ArchiveCredentialConfigurationError("unknown archive configuration field")
     _walk(value)
-    _public_origin(value.get("endpoint"),"endpoint")
-    _public_origin(value.get("issuer"),"issuer")
-    keyring=value.get("keyring")
-    if (not isinstance(keyring,str) or not keyring.startswith("/")
-            or re.search(r"(private|secret|signing)",keyring,re.I)):
-        raise ArchiveCredentialConfigurationError(
-            "archive verification keyring must be an explicit public-key path"
-        )
+    if "endpoint" in value:
+        _public_origin(value["endpoint"],"endpoint")
+    if "issuer" in value:
+        _public_origin(value["issuer"],"issuer")
+    if "keyring" in value:
+        keyring=value["keyring"]
+        if (not isinstance(keyring,str) or not keyring.startswith("/")
+                or re.search(r"(private|secret|signing)",keyring,re.I)):
+            raise ArchiveCredentialConfigurationError(
+                "archive verification keyring must be an explicit public-key path"
+            )
     sources=value.get("sources",[])
     if not isinstance(sources,list):
         raise ArchiveCredentialConfigurationError("sources must be a list")
@@ -89,6 +92,11 @@ def validate_configuration(value):
 
 def inventory(value):
     validate_configuration(value)
+    required={"endpoint","issuer","audience","collections","keyring"}
+    if not required <= set(value):
+        raise ArchiveCredentialConfigurationError(
+            "complete serving configuration required for credential inventory"
+        )
     policy=archive_credentials.inventory()
     return {
         "schema":SCHEMA,
