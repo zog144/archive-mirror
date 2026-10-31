@@ -254,3 +254,112 @@ class ProviderCredentialTests(TestCase):
             provider_credentials.install_verified(
                 rotated,authorization,request,delivery,now=time.time()
             )
+
+    def test_host_installation_state_and_registry_identity_changes_reject_existing_secret(self):
+        result,_,_,delivery=self.install()
+        original=(self.root/"provider-credentials"/(result["scope_id"]+".secret")).read_bytes()
+        changes=(
+            {"host_fingerprint":"a"*64},
+            {"installation_id":str(uuid.uuid4())},
+            {"state_volume_id":str(uuid.uuid4())},
+            {"registry_id":"other-registry"},
+        )
+        for changed in changes:
+            with self.subTest(changed=tuple(changed)):
+                other={**self.scope,**changed}
+                # The provider scope stays constant while the canonical
+                # destination binding differs; neither may authorize reuse.
+                self.assertEqual(
+                    archive_credentials.provider_scope(other)["scope_id"],
+                    result["scope_id"],
+                )
+                with self.assertRaisesRegex(
+                    provider_credentials.ProviderCredentialError,
+                    "does not match scope",
+                ):
+                    provider_credentials.open_for(
+                        other,operation="fetch",collection="sources",
+                    )
+                self.assertEqual(provider_credentials.inspect(other)["status"],"blocked")
+        self.assertEqual(
+            (self.root/"provider-credentials"/(result["scope_id"]+".secret")).read_bytes(),
+            original,
+        )
+
+    def test_changed_state_cannot_adopt_credential_by_rotation(self):
+        result,_,_,previous=self.install()
+        moved={
+            **self.scope,
+            "state_volume_id":str(uuid.uuid4()),
+            "credential_revision":4,
+        }
+        authorization,request,delivery=self.exchange(
+            b"replacement",moved,action="renew",
+            previous_delivery_id=previous["delivery_id"],
+        )
+        with self.assertRaisesRegex(
+            provider_credentials.ProviderCredentialError,
+            "destination identity changed",
+        ):
+            provider_credentials.install_verified(
+                moved,authorization,request,delivery,now=time.time(),
+            )
+        with provider_credentials.open_for(
+            self.scope,operation="fetch",collection="sources",
+        ) as stream:
+            self.assertEqual(stream.read(),b"provider-secret")
+
+    def test_tampered_record_identity_fails_closed_without_erasing_secret(self):
+        result,_,_,_=self.install()
+        directory=self.root/"provider-credentials"
+        path=directory/(result["scope_id"]+".json")
+        value=json.loads(path.read_text())
+        value["installation_id"]=str(uuid.uuid4())
+        path.write_text(json.dumps(value))
+        self.assertEqual(provider_credentials.inspect(self.scope)["status"],"blocked")
+        with self.assertRaises(provider_credentials.ProviderCredentialError):
+            provider_credentials.open_for(
+                self.scope,operation="fetch",collection="sources",
+            )
+        self.assertEqual(
+            (directory/(result["scope_id"]+".secret")).read_bytes(),
+            b"provider-secret",
+        )
+
+    def test_wrong_purpose_and_credential_revision_never_install(self):
+        authorization,request,delivery=self.exchange()
+        authorization["purpose"]="issuer-cloudflare-dns01"
+        with self.assertRaises(archive_credentials.ArchiveCredentialPolicyError):
+            provider_credentials.install_verified(
+                self.scope,authorization,request,delivery,now=time.time(),
+            )
+        authorization,request,delivery=self.exchange()
+        authorization["credential_revision"]+=1
+        with self.assertRaises(archive_credentials.ArchiveCredentialPolicyError):
+            provider_credentials.install_verified(
+                self.scope,authorization,request,delivery,now=time.time(),
+            )
+        self.assertFalse((self.root/"provider-credentials").exists())
+
+    def test_lower_revision_cannot_replace_rotated_provider_secret(self):
+        first,_,_,previous=self.install(b"first")
+        rotated={**self.scope,"credential_revision":4}
+        authorization,request,delivery=self.exchange(
+            b"second",rotated,action="renew",
+            previous_delivery_id=previous["delivery_id"],
+        )
+        provider_credentials.install_verified(
+            rotated,authorization,request,delivery,now=time.time(),
+        )
+        old_auth,old_request,old_delivery=self.exchange(b"old-replay")
+        with self.assertRaisesRegex(
+            provider_credentials.ProviderCredentialError,
+            "revision rollback",
+        ):
+            provider_credentials.install_verified(
+                self.scope,old_auth,old_request,old_delivery,now=time.time(),
+            )
+        with provider_credentials.open_for(
+            rotated,operation="fetch",collection="sources",
+        ) as stream:
+            self.assertEqual(stream.read(),b"second")
