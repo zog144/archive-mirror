@@ -22,8 +22,8 @@ from .config import configuration
 from .lease import lease
 from .store import named_lock, sync_directory
 
-INSTALL_SCHEMA = "zog-archive-provider-credential-installation-v1"
-PENDING_SCHEMA = "zog-archive-provider-credential-pending-v1"
+INSTALL_SCHEMA = "zog-archive-provider-credential-installation-v2"
+PENDING_SCHEMA = "zog-archive-provider-credential-pending-v2"
 
 
 class ProviderCredentialError(ValueError):
