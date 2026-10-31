@@ -66,7 +66,8 @@ class ProviderCredentialTests(TestCase):
         }))
         self.intent.chmod(0o640)
 
-    def exchange(self,secret=b"provider-secret",scope=None,now=None):
+    def exchange(self,secret=b"provider-secret",scope=None,now=None,
+                 action="deliver",previous_delivery_id=None):
         scope=scope or self.scope
         now=int(time.time()) if now is None else now
         selected=archive_credentials.provider_scope(scope)
@@ -84,8 +85,9 @@ class ProviderCredentialTests(TestCase):
             "expires_at":now+3600,
         }
         request=archive_credentials.request(
-            scope,authorization,request_id=str(uuid.uuid4()),action="deliver",
-            previous_delivery_id=None,created_at=now,expires_at=now+90,
+            scope,authorization,request_id=str(uuid.uuid4()),action=action,
+            previous_delivery_id=previous_delivery_id,
+            created_at=now,expires_at=now+90,
         )
         delivery={
             "schema":credential_delivery.DELIVERY_SCHEMA,
@@ -210,9 +212,12 @@ class ProviderCredentialTests(TestCase):
             self.assertEqual(source.read(),b"provider-secret")
 
     def test_scope_rotation_requires_higher_credential_revision(self):
-        first,_,_,_=self.install(b"old-secret")
+        first,_,_,first_delivery=self.install(b"old-secret")
         rotated={**self.scope,"credential_revision":4}
-        authorization,request,delivery=self.exchange(b"new-secret",rotated)
+        authorization,request,delivery=self.exchange(
+            b"new-secret",rotated,action="renew",
+            previous_delivery_id=first_delivery["delivery_id"],
+        )
         result=provider_credentials.install_verified(
             rotated,authorization,request,delivery,now=time.time()
         )
@@ -224,4 +229,28 @@ class ProviderCredentialTests(TestCase):
         with self.assertRaises(provider_credentials.ProviderCredentialError):
             provider_credentials.open_for(
                 self.scope,operation="fetch",collection="sources"
+            )
+
+
+    def test_rotation_must_chain_exact_previous_delivery(self):
+        first,_,_,first_delivery=self.install(b"old-secret")
+        rotated={**self.scope,"credential_revision":4}
+        authorization,request,delivery=self.exchange(
+            b"new-secret",rotated,action="deliver"
+        )
+        with self.assertRaisesRegex(
+            provider_credentials.ProviderCredentialError,"rotation is not chained"
+        ):
+            provider_credentials.install_verified(
+                rotated,authorization,request,delivery,now=time.time()
+            )
+        authorization,request,delivery=self.exchange(
+            b"new-secret",rotated,action="renew",
+            previous_delivery_id=str(uuid.uuid4()),
+        )
+        with self.assertRaisesRegex(
+            provider_credentials.ProviderCredentialError,"rotation is not chained"
+        ):
+            provider_credentials.install_verified(
+                rotated,authorization,request,delivery,now=time.time()
             )
