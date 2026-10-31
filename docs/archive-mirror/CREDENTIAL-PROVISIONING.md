@@ -101,3 +101,15 @@ covers the corresponding common-protocol scope and authorization binding.
 
 This pass changes source only. No live credential, provider, archive role,
 network endpoint or production archive state is mutated.
+
+### Reconciliation: installation-record schema v2
+
+Private provider installation evidence now records the **exact canonical destination**:
+Host ID, HostIdentity fingerprint, installation ID, STATE volume ID and registry
+ID, in addition to provider/collection/purpose/role and revision. The private
+installation and pending schemas are v2. Changes in those identities block
+`open_for`, inspection and attempted credential rotation even when the
+provider's scope-derived credential ID remains unchanged. A legacy v1
+installation record must be reprovisioned by the protected receiver under
+reviewed authority; it is never silently upgraded or adopted. This does not
+delete retained archive content or pin metadata.

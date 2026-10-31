@@ -363,3 +363,35 @@ class ProviderCredentialTests(TestCase):
             rotated,operation="fetch",collection="sources",
         ) as stream:
             self.assertEqual(stream.read(),b"second")
+
+    def test_legacy_v1_record_requires_protected_reprovisioning(self):
+        result,_,_,previous=self.install()
+        directory=self.root/"provider-credentials"
+        record_path=directory/(result["scope_id"]+".json")
+        record=json.loads(record_path.read_text())
+        record["schema"]="zog-archive-provider-credential-installation-v1"
+        for key in ("host_id","host_fingerprint","installation_id",
+                    "state_volume_id","registry_id"):
+            record.pop(key)
+        record_path.write_text(json.dumps(record))
+        self.assertEqual(provider_credentials.inspect(self.scope)["status"],"blocked")
+        with self.assertRaises(provider_credentials.ProviderCredentialError):
+            provider_credentials.open_for(
+                self.scope,operation="fetch",collection="sources",
+            )
+        rotated={**self.scope,"credential_revision":4}
+        authorization,request,delivery=self.exchange(
+            b"renewal",rotated,action="renew",
+            previous_delivery_id=previous["delivery_id"],
+        )
+        with self.assertRaisesRegex(
+            provider_credentials.ProviderCredentialError,
+            "invalid provider credential installation record",
+        ):
+            provider_credentials.install_verified(
+                rotated,authorization,request,delivery,now=time.time(),
+            )
+        self.assertEqual(
+            (directory/(result["scope_id"]+".secret")).read_bytes(),
+            b"provider-secret",
+        )
