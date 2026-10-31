@@ -141,6 +141,11 @@ def _installation(selected,authorization,delivery,*,now):
         "scope_id":selected["scope_id"],
         "credential_id":selected["credential_id"],
         "credential_revision":selected["credential_revision"],
+        "host_id":selected["host_id"],
+        "host_fingerprint":selected["host_fingerprint"],
+        "installation_id":selected["installation_id"],
+        "state_volume_id":selected["state_volume_id"],
+        "registry_id":selected["registry_id"],
         "provider_id":selected["provider_id"],
         "provider_origin":selected["provider_origin"],
         "provider_role":selected["provider_role"],
@@ -162,6 +167,22 @@ def _matching(record,expected):
         set(record)==set(expected)
         and all(record.get(key)==expected.get(key) for key in stable)
         and type(record.get("installed_at")) is int
+    )
+
+
+# An unchanged provider scope does not imply unchanged Host/installation/STATE.
+# Compare the exact destination identity before replay, rotation, inspection or
+# secret use; never adopt an old credential under a changed local identity.
+_IDENTITY_FIELDS = (
+    "host_id", "host_fingerprint", "installation_id",
+    "state_volume_id", "registry_id",
+)
+
+
+def _record_identity_matches(record, selected):
+    return (
+        isinstance(record, dict)
+        and all(record.get(key) == selected[key] for key in _IDENTITY_FIELDS)
     )
 
 
@@ -207,6 +228,8 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
         if old is not None:
             if old.get("schema") != INSTALL_SCHEMA:
                 _deny("invalid provider credential installation record")
+            if not _record_identity_matches(old, selected):
+                _deny("provider credential destination identity changed")
             old_revision=old.get("credential_revision")
             if type(old_revision) is not int:
                 _deny("invalid provider credential installation record")
@@ -291,6 +314,7 @@ def open_for(scope,*,operation,collection):
         or expected.get("scope_id") != selected["scope_id"]
         or expected.get("credential_id") != selected["credential_id"]
         or expected.get("credential_revision") != selected["credential_revision"]
+        or not _record_identity_matches(expected, selected)
         or expected.get("provider_id") != selected["provider_id"]
         or expected.get("provider_origin") != selected["provider_origin"]
         or expected.get("provider_role") != selected["provider_role"]
@@ -320,6 +344,16 @@ def inspect(scope):
     if record is None:
         return {"schema":INSTALL_SCHEMA,"status":"unavailable",
                 "scope_id":selected["scope_id"]}
+    if (
+        record.get("schema") != INSTALL_SCHEMA
+        or not _record_identity_matches(record,selected)
+        or record.get("scope_id") != selected["scope_id"]
+        or record.get("credential_id") != selected["credential_id"]
+        or record.get("credential_revision") != selected["credential_revision"]
+        or record.get("role_revision") != selected["role_revision"]
+    ):
+        return {"schema":INSTALL_SCHEMA,"status":"blocked",
+                "scope_id":selected["scope_id"],"reason":"scope-or-identity-mismatch"}
     try:
         fd=_secret_file_ok(directory,secret_name);os.close(fd)
     except (OSError,ProviderCredentialError):
