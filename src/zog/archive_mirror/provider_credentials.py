@@ -155,7 +155,14 @@ def _installation(selected,authorization,delivery,*,now):
 
 
 def _matching(record,expected):
-    return record == expected
+    if not isinstance(record,dict) or not isinstance(expected,dict):
+        return False
+    stable=set(expected)-{"installed_at"}
+    return (
+        set(record)==set(expected)
+        and all(record.get(key)==expected.get(key) for key in stable)
+        and type(record.get("installed_at")) is int
+    )
 
 
 def _secret_file_ok(directory,name):
