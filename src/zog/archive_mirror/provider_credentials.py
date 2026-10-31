@@ -217,6 +217,13 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
                     fd=_secret_file_ok(directory,secret_name);os.close(fd)
                     return {**expected,"status":"installed","replayed":True}
                 _deny("provider credential revision conflict")
+            if (
+                request_value.get("action") != "renew"
+                or request_value.get("previous_delivery_id") != old.get("delivery_id")
+            ):
+                _deny("provider credential rotation is not chained")
+        elif request_value.get("action") != "deliver":
+            _deny("initial provider credential must use deliver")
         if pending is not None and (
             pending.get("schema") != PENDING_SCHEMA
             or pending.get("scope_id") != selected["scope_id"]
