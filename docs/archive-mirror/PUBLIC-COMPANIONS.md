@@ -5,7 +5,7 @@ Archive-mirror 0.4.2 imports `zog.host_identify`.
 The exact companion selected for the purpose-scoped archive provider credential
 adapter is:
 
-`zog144/host-identify@7881c116af45286d03f1da4ec70de8668acd52c2`
+`zog144/host-identify@c33c779acc3fd22f2e60324ecbd4d3baf7107afb`
 
 This revision provides the canonical unified HTTPS credential protocol plus the
 archive-specific `archive-mirror-upstream-fetch` profile. The existing
@@ -27,3 +27,5 @@ The archive-mirror GitHub workflow checks out and verifies this exact companion
 SHA before running the full Django suite, then executes the companion tests as
 well. Source CI does not authorize live credential delivery or provider
 activation.
+
+The 2026-10-31 reconciliation adds exact destination-identity checks to archive's private installation record and negative purpose/revision/rotation tests in both source trees. Prior private installation records lacking destination identity must be rejected and re-provisioned under the protected receiver rather than silently adopted.
