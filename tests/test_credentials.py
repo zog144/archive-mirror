@@ -39,7 +39,11 @@ class ArchiveCredentialBoundaryTests(SimpleTestCase):
         self.assertEqual(value["schema"],"zog-archive-mirror-credential-inventory-v1")
         self.assertEqual(value["provider"]["https_delivery_purposes"],["archive-mirror-upstream-fetch"])
         self.assertFalse(value["provider"]["archive_owned_service_secret"])
-        self.assertFalse(value["provider"]["upstream_credentials_configured"])\n        self.assertTrue(value["provider"]["provider_secret_supported"])\n        self.assertFalse(value["provider"]["provider_secret_in_configuration"])\n        self.assertEqual(value["provider"]["provider_role"],"archive-mirror-provider")\n        self.assertEqual(value["provider"]["provider_operations"],["fetch"])
+        self.assertFalse(value["provider"]["upstream_credentials_configured"])
+        self.assertTrue(value["provider"]["provider_secret_supported"])
+        self.assertFalse(value["provider"]["provider_secret_in_configuration"])
+        self.assertEqual(value["provider"]["provider_role"],"archive-mirror-provider")
+        self.assertEqual(value["provider"]["provider_operations"],["fetch"])
         self.assertEqual(
             value["access_authorization"]["delivery"],
             "existing-authenticated-host-response",
