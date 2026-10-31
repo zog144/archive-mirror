@@ -54,10 +54,10 @@ def _public_origin(value, field):
 def validate_configuration(value):
     """Reject archive-owned durable secret configuration.
 
-    Current archive acquisition is credential-free. Short-lived consumer JWTs
-    are not server configuration, and the token signing private key belongs only
-    to the authority. Future durable archive secrets require a separately
-    reviewed common-HTTPS delivery purpose.
+    Short-lived consumer JWTs are not server configuration, and the token
+    signing private key belongs only to the authority. Durable upstream-provider
+    secrets are installed only through the reviewed common-HTTPS provider
+    adapter and must never appear in configuration.json.
     """
     if not isinstance(value,dict) or set(value)-_ALLOWED_CONFIGURATION:
         raise ArchiveCredentialConfigurationError("unknown archive configuration field")
@@ -113,10 +113,15 @@ def inventory(value):
             "endpoint":value["endpoint"],
             "verification_keyring":"public-only",
             "archive_owned_service_secret":False,
+            "provider_secret_supported":True,
+            "provider_secret_in_configuration":False,
             "upstream_credentials_configured":False,
             "https_delivery_purposes":list(
                 archive_credentials.enabled_https_purposes()
             ),
+            "provider_scope_schema":archive_credentials.PROVIDER_SCOPE_SCHEMA,
+            "provider_role":archive_credentials.PROVIDER_ROLE,
+            "provider_operations":[archive_credentials.PROVIDER_OPERATION],
         },
         "classes":policy["classes"],
     }

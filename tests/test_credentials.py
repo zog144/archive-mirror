@@ -33,13 +33,13 @@ class ArchiveCredentialBoundaryTests(SimpleTestCase):
         path.write_text(json.dumps(value))
         return override_settings(ARCHIVE_MIRROR_CONFIGURATION=str(path))
 
-    def test_inventory_is_sanitized_and_has_no_https_secret_purpose(self):
+    def test_inventory_is_sanitized_and_exposes_only_provider_https_purpose(self):
         with self.configured(self.base):
             value=inventory(configuration())
         self.assertEqual(value["schema"],"zog-archive-mirror-credential-inventory-v1")
-        self.assertEqual(value["provider"]["https_delivery_purposes"],[])
+        self.assertEqual(value["provider"]["https_delivery_purposes"],["archive-mirror-upstream-fetch"])
         self.assertFalse(value["provider"]["archive_owned_service_secret"])
-        self.assertFalse(value["provider"]["upstream_credentials_configured"])
+        self.assertFalse(value["provider"]["upstream_credentials_configured"])\n        self.assertTrue(value["provider"]["provider_secret_supported"])\n        self.assertFalse(value["provider"]["provider_secret_in_configuration"])\n        self.assertEqual(value["provider"]["provider_role"],"archive-mirror-provider")\n        self.assertEqual(value["provider"]["provider_operations"],["fetch"])
         self.assertEqual(
             value["access_authorization"]["delivery"],
             "existing-authenticated-host-response",

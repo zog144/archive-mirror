@@ -1,93 +1,103 @@
-# Unified archive credential provisioning boundary
+# Unified archive credential provisioning
 
-Archive-mirror uses the approved Zog credential-delivery framework only for
-durable cross-host secrets that genuinely require provisioning. **No such
-archive-owned secret exists in the current implementation**, so the archive
-adapter intentionally enables zero HTTPS delivery purposes.
+Archive-mirror now has one narrow durable-secret adapter on top of the canonical
+Zog HTTPS credential-delivery v1 protocol. It remains strictly separate from the
+existing short-lived archive access grants.
 
-This is a security boundary, not missing transport code.
+## Two separate credential planes
 
-## Inventory
+**Archive consumer access grants** remain `zog-archive-jwt-v1` bearer tokens.
+They are delivered through the existing authenticated Host response and checked
+on each use for issuer, audience, archive operation, collection and expiry.
+They are never converted to a long-lived provider password and never use the
+provider credential purpose below.
 
-Current archive-related credential classes are:
+**Archive upstream-provider credentials** use the common HTTPS credential
+framework only when archive-mirror needs a durable secret for an approved
+upstream provider. The archive-specific profile is:
 
-- **Consumer access token** — the existing short-lived
-  `zog-archive-jwt-v1` bearer grant. It is issued by the archive authority and
-  delivered through the authenticated Host response path. Every use checks the
-  configured issuer and audience plus explicit operation, collection and
-  expiry. It is not converted to a password or persisted as a provider secret.
-- **Token issuer signing private key** — durable authority secret. It must
-  remain with the archive token authority and is never provisioned to a mirror.
-  Archive-mirror receives only public Ed25519 verification keys.
-- **Verification keyring** — public rotatable configuration, not a secret.
-- **Upstream collection credential** — not supported today. Both monthly Git
-  collection and reviewed exact-source acquisition require credential-free
-  HTTPS origins and reject embedded credentials.
-- **Provider/service credential** — none. Archive serving does not use a shared
-  provider password.
-- **TLS private key** — owned by certificate management / HTTPS termination, not
-  by archive-mirror.
+- consumer: `archive-mirror`
+- purpose: `archive-mirror-upstream-fetch`
+- scope: `zog-archive-provider-credential-scope-v1`
+- provider role: `archive-mirror-provider`
+- operation: exactly `fetch`
 
-The same bounded metadata is available with:
+The scope binds the exact Host ID and HostIdentity fingerprint, installation,
+STATE volume, registry, upstream provider ID and credential-free HTTPS origin,
+the current archive-mirror provider-role revision, exact sorted collections,
+operation, underlying provider credential ID and credential revision.
 
-```sh
-archive-mirror credential-inventory
-```
+Host-identify derives the common protocol `credential_id` from SHA-256 of the
+nonsecret provider/origin/role/collection/operation/provider-credential scope.
+Changing collection, provider origin, role revision, operation or provider
+credential identity therefore requires a different common authorization.
+Credential rotation advances `credential_revision` without weakening scope.
 
-The command never returns token bytes, signing keys, filesystem secret paths or
-vault material.
+## Protected local installation
 
-## Common HTTPS framework integration
+`zog.archive_mirror.provider_credentials.install_verified()` is the
+archive-specific installation adapter. The protected common HTTPS receiver must
+first verify the Credential Authority signature and pin, HostIdentity-signed
+request, nonce/replay ledger, authorization state and signed delivery. The
+archive adapter then:
 
-`zog.host_identify.archive_credentials` is the archive-specific profile
-registry. `enabled_https_purposes()` currently returns an empty tuple and
-`https_delivery_profile(kind)` rejects every current class.
+1. revalidates the exact archive scope against the canonical request/delivery;
+2. requires the current archive-mirror provider lease to match Host and exact
+   role revision;
+3. writes the opaque provider secret only to
+   `ROOT/provider-credentials/` under a service-owned `0700` directory and a
+   `0600`, single-link, non-symlink secret file;
+4. persists only secret-free installation metadata and a crash-recovery pending
+   marker;
+5. supports idempotent replay of the exact same verified delivery and
+   higher-revision rotation;
+6. returns only secret-free installation evidence for the common receiver to
+   correlate with its signed installation receipt.
 
-That means archive-mirror **does not**:
+The common receiver still owns HTTPS, authority signature verification,
+anti-replay/revocation state and the canonical signed installation receipt.
+Archive-mirror does not open a second network secret endpoint.
 
-- reuse `issuer-cloudflare-dns01` or another component's purpose;
-- add its own HTTP/SSH/socket secret transport;
-- turn archive JWTs into long-lived shared passwords;
-- install the token authority's signing key;
-- accept arbitrary provider credentials in archive configuration.
+`open_for(scope, operation="fetch", collection=...)` returns a protected file
+descriptor only when the installed scope, current provider-role lease,
+collection and operation all still match. It never selects a path from caller
+input.
 
-If a future archive feature genuinely needs a durable cross-host secret, its
-source change must add one explicit archive purpose and bind the common HTTPS
-request to the exact approved Host/installation identity, provider or collection
-role, credential revision, protected archive consumer/destination and allowed
-operation. Replay/revocation handling, HTTP-signature verification and protected
-local installation remain owned by the shared credential-delivery framework and
-root/controller receiver; archive-mirror should supply only the narrow
-archive-specific profile.
+## Withdrawal and persistence
 
-## Provider lifecycle and withdrawal
+Archive provider-role withdrawal or revision/Host identity change immediately
+makes `open_for` fail closed. The credential file is not treated as permission
+by itself.
 
-Mirror role selection remains independent of credential storage. A withdrawn or
-expired role makes serving/discovery fail closed, but retained archive objects,
-catalogue rows and pins remain on persistent archive storage.
+Role withdrawal does **not** delete retained archive objects, pins, reviewed
+source memberships or catalogue history. A separately authorized credential
+revocation/removal workflow may delete or rotate the provider secret without
+touching retained archive contents.
 
-Short-lived consumer grants remain independently bounded by their own expiry.
-Changing the approved Host identity invalidates the current local
-candidate/token binding; it does not migrate or refresh a credential implicitly.
+The private provider credential directory is persistent application state, so a
+valid installed credential survives ordinary archive-mirror restart/reboot.
+Its use still requires a current matching provider lease after restart.
 
-## Configuration fail-closed behavior
+## Secrets that never move here
 
-Archive-mirror configuration is now a closed reviewed schema. Fields named as
-passwords, tokens, credentials, signing/private keys or similar secrets are
-rejected, including nested source definitions. Provider and issuer origins must
-be credential-free HTTPS origins. Current source URLs with embedded
-username/password credentials are rejected.
+- The archive token issuer's signing private key is never provisioned to a
+  mirror; mirrors receive public verification keys only.
+- TLS private keys remain owned by certificate/HTTPS termination.
+- Provider secret bytes are never accepted in `configuration.json`, upstream
+  URLs, argv, journals, browser/session responses or archive JWT records.
+- Current Git/reviewed-source fetch code remains credential-free until a
+  provider-specific acquisition adapter explicitly consumes `open_for`.
 
-This prevents a future deployment from bypassing the unified credential
-framework by putting a durable secret into `configuration.json`.
+`archive-mirror credential-inventory` reports only the nonsecret policy and
+enabled purpose; it never reports an installed provider secret or secret path.
 
 ## Source verification
 
-- archive-mirror: `tests/test_credentials.py` and existing authorization/
-  provider-lifecycle tests;
-- host-identify: `tests/test_archive_credentials.py`, including role
-  withdrawal, expired access grants, incorrect collection scope and Host
-  identity changes.
+`tests/test_provider_credentials.py` covers private installation, exact
+collection/operation checks, role withdrawal with retained archive contents,
+Host/role revision changes, expiry/revocation, idempotent replay, rotation and
+secret-free inspection. Host-identify's `tests/test_archive_credentials.py`
+covers the corresponding common-protocol scope and authorization binding.
 
-No live provider credential, vault secret, archive role, DNS, service or
-production archive state is changed by this source integration.
+This pass changes source only. No live credential, provider, archive role,
+network endpoint or production archive state is mutated.

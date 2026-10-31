@@ -149,7 +149,7 @@ protect long-term build inputs administratively before relying on retention.
 
 ## Credential provisioning boundary
 
-Archive bearer grants remain short-lived, scoped JWTs. Archive-mirror has no current durable archive-owned secret that should be provisioned cross-host, so the unified HTTPS credential framework has **zero enabled archive purposes** today; issuer signing keys never move to mirrors and current upstream acquisition remains credential-free. `archive-mirror credential-inventory` emits the bounded nonsecret inventory. See [credential provisioning](docs/archive-mirror/CREDENTIAL-PROVISIONING.md).
+Archive bearer grants remain short-lived, scoped JWTs. Durable upstream-provider credentials use the separate `archive-mirror-upstream-fetch` profile of the unified HTTPS credential framework, bound to the exact Host, provider-role revision, provider origin, collections and `fetch` operation. Provider secrets install only into private persistent application state; issuer signing keys never move to mirrors, and ordinary archive access grants never become provider passwords. `archive-mirror credential-inventory` emits only the bounded nonsecret policy. See [credential provisioning](docs/archive-mirror/CREDENTIAL-PROVISIONING.md).
 
 ## HTTP and authorization
 
