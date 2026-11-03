@@ -523,3 +523,35 @@ class ProviderCredentialTests(TestCase):
             provider_credentials.install_verified(
                 self.scope,auth,request,delivery,now=time.time(),
             )
+
+    def test_revocation_after_role_withdrawal_persists_and_conflicting_replay_fails(self):
+        result,auth,_,_=self.install()
+        self.set_role(selected=False,revision=8)
+        key=Ed25519PrivateKey.generate()
+        envelope,public=self.signed_revocation(auth,authority=key)
+        first=provider_credentials.apply_signed_revocation(
+            self.scope,envelope,public,expected_issuer=auth["issuer"],
+            now=time.time(),
+        )
+        self.assertFalse(first["replayed"])
+        self.assertEqual(
+            provider_credentials.inspect(self.scope)["reason"],
+            "authorization-revoked",
+        )
+        altered={
+            **envelope["authorization"],
+            "revision":envelope["authorization"]["revision"]+1,
+        }
+        other=credential_delivery.sign_authorization(altered,key)
+        with self.assertRaisesRegex(
+            provider_credentials.ProviderCredentialError,
+            "conflicting provider authorization revocation",
+        ):
+            provider_credentials.apply_signed_revocation(
+                self.scope,other,public,expected_issuer=auth["issuer"],
+                now=time.time(),
+            )
+        self.assertTrue(
+            (self.root/"provider-credentials"/
+             (result["scope_id"]+".secret")).exists()
+        )
