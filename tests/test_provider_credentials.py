@@ -456,13 +456,11 @@ class ProviderCredentialTests(TestCase):
             )
         revoked={**auth,"status":"revoked","revision":auth["revision"]+1,
                  "revoked_at":int(time.time()),"purpose":"wrong-purpose"}
-        forged=credential_delivery.sign_authorization(
-            revoked,Ed25519PrivateKey.generate(),
-        )
+        signing_key=Ed25519PrivateKey.generate()
+        forged=credential_delivery.sign_authorization(revoked,signing_key)
         with self.assertRaises(credential_delivery.CredentialProtocolError):
             provider_credentials.apply_signed_revocation(
-                self.scope,forged,
-                Ed25519PrivateKey.generate().public_key(),
+                self.scope,forged,signing_key.public_key(),
                 expected_issuer=auth["issuer"],now=time.time(),
             )
         self.assertEqual(provider_credentials.inspect(self.scope)["status"],
@@ -501,6 +499,7 @@ class ProviderCredentialTests(TestCase):
             "credential_revision":result["credential_revision"],
             "delivery_id":str(uuid.uuid4()),
         }))
+        pending.chmod(0o600)
         with self.assertRaisesRegex(provider_credentials.ProviderCredentialError,
                                    "recovery required"):
             provider_credentials.install_verified(
