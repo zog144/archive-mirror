@@ -5,7 +5,7 @@ Archive-mirror 0.4.2 imports `zog.host_identify`.
 The exact companion selected for the purpose-scoped archive provider credential
 adapter is:
 
-`zog144/host-identify@c33c779acc3fd22f2e60324ecbd4d3baf7107afb`
+`zog144/host-identify@59dbc181f54c6ac29ee5eb1f83b6f322fb73c037`
 
 This revision provides the canonical unified HTTPS credential protocol plus the
 archive-specific `archive-mirror-upstream-fetch` profile. The existing
