@@ -395,3 +395,132 @@ class ProviderCredentialTests(TestCase):
             (directory/(result["scope_id"]+".secret")).read_bytes(),
             b"provider-secret",
         )
+
+    def signed_revocation(self,authorization,*,revision=None,authority=None):
+        authority=authority or Ed25519PrivateKey.generate()
+        moment=int(time.time())
+        revoked={
+            **authorization,
+            "status":"revoked",
+            "revision":revision or authorization["revision"]+1,
+            "revoked_at":moment,
+        }
+        return (
+            credential_delivery.sign_authorization(revoked,authority),
+            authority.public_key(),
+        )
+
+    def test_signed_revocation_blocks_use_and_replay_without_deleting_archives(self):
+        result,auth,request,delivery=self.install()
+        source=self.base/"retained.bin";source.write_bytes(b"retained-after-revocation")
+        archive=store.publish(source,"sources","source",{"purpose":"test"},
+                              source="revocation-test",month="2026-11",commit="one")
+        obj=self.root/"objects"/archive.digest
+        envelope,key=self.signed_revocation(auth)
+        status=provider_credentials.apply_signed_revocation(
+            self.scope,envelope,key,expected_issuer=auth["issuer"],
+            now=time.time(),
+        )
+        self.assertEqual(status["status"],"revoked")
+        self.assertFalse(status["replayed"])
+        self.assertEqual(provider_credentials.inspect(self.scope)["reason"],
+                         "authorization-revoked")
+        with self.assertRaisesRegex(provider_credentials.ProviderCredentialError,
+                                   "authorization revoked"):
+            provider_credentials.open_for(
+                self.scope,operation="fetch",collection="sources",
+            )
+        with self.assertRaisesRegex(provider_credentials.ProviderCredentialError,
+                                   "authorization revoked"):
+            provider_credentials.install_verified(
+                self.scope,auth,request,delivery,now=time.time(),
+            )
+        status=provider_credentials.apply_signed_revocation(
+            self.scope,envelope,key,expected_issuer=auth["issuer"],
+            now=time.time(),
+        )
+        self.assertTrue(status["replayed"])
+        self.assertEqual(obj.read_bytes(),b"retained-after-revocation")
+        self.assertTrue(Archive.objects.filter(pk=archive.pk).exists())
+        marker=self.root/"provider-credentials"/(result["scope_id"]+".revoked.json")
+        self.assertEqual(stat.S_IMODE(marker.stat().st_mode),0o600)
+        self.assertNotIn("provider-secret",marker.read_text())
+
+    def test_unsigned_wrong_key_or_wrong_purpose_cannot_revoke(self):
+        result,auth,_,_=self.install()
+        envelope,key=self.signed_revocation(auth)
+        with self.assertRaises(credential_delivery.CredentialProtocolError):
+            provider_credentials.apply_signed_revocation(
+                self.scope,envelope,Ed25519PrivateKey.generate().public_key(),
+                expected_issuer=auth["issuer"],now=time.time(),
+            )
+        revoked={**auth,"status":"revoked","revision":auth["revision"]+1,
+                 "revoked_at":int(time.time()),"purpose":"wrong-purpose"}
+        forged=credential_delivery.sign_authorization(
+            revoked,Ed25519PrivateKey.generate(),
+        )
+        with self.assertRaises(credential_delivery.CredentialProtocolError):
+            provider_credentials.apply_signed_revocation(
+                self.scope,forged,
+                Ed25519PrivateKey.generate().public_key(),
+                expected_issuer=auth["issuer"],now=time.time(),
+            )
+        self.assertEqual(provider_credentials.inspect(self.scope)["status"],
+                         "installed")
+
+    def test_stale_revocation_or_changed_authority_cannot_disable_other_installation(self):
+        result,auth,_,_=self.install()
+        expired_envelope,key=self.signed_revocation(
+            auth,revision=auth["revision"],
+        )
+        with self.assertRaisesRegex(provider_credentials.ProviderCredentialError,
+                                   "stale provider authorization"):
+            provider_credentials.apply_signed_revocation(
+                self.scope,expired_envelope,key,
+                expected_issuer=auth["issuer"],now=time.time(),
+            )
+        other={**auth,"authorization_id":str(uuid.uuid4())}
+        envelope,key=self.signed_revocation(other)
+        with self.assertRaisesRegex(provider_credentials.ProviderCredentialError,
+                                   "does not match installed authority"):
+            provider_credentials.apply_signed_revocation(
+                self.scope,envelope,key,
+                expected_issuer=auth["issuer"],now=time.time(),
+            )
+        self.assertEqual(provider_credentials.inspect(self.scope)["status"],
+                         "installed")
+
+    def test_pending_replay_requires_exact_delivery_not_different_unresolved_installation(self):
+        result,auth,request,delivery=self.install()
+        directory=self.root/"provider-credentials"
+        pending=directory/(result["scope_id"]+".pending.json")
+        pending.write_text(json.dumps({
+            "schema":provider_credentials.PENDING_SCHEMA,
+            "scope_id":result["scope_id"],
+            "credential_id":result["credential_id"],
+            "credential_revision":result["credential_revision"],
+            "delivery_id":str(uuid.uuid4()),
+        }))
+        with self.assertRaisesRegex(provider_credentials.ProviderCredentialError,
+                                   "recovery required"):
+            provider_credentials.install_verified(
+                self.scope,auth,request,delivery,now=time.time(),
+            )
+        pending_data=json.loads(pending.read_text())
+        pending_data["delivery_id"]=delivery["delivery_id"]
+        pending.write_text(json.dumps(pending_data))
+        receipt=provider_credentials.install_verified(
+            self.scope,auth,request,delivery,now=time.time(),
+        )
+        self.assertTrue(receipt["replayed"])
+        self.assertFalse(pending.exists())
+
+    def test_replay_detects_secret_replacement_even_with_correct_record(self):
+        result,auth,request,delivery=self.install()
+        path=self.root/"provider-credentials"/(result["scope_id"]+".secret")
+        path.write_bytes(b"wrong-secret")
+        with self.assertRaisesRegex(provider_credentials.ProviderCredentialError,
+                                   "replay bytes differ"):
+            provider_credentials.install_verified(
+                self.scope,auth,request,delivery,now=time.time(),
+            )

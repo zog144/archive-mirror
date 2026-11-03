@@ -113,3 +113,26 @@ provider's scope-derived credential ID remains unchanged. A legacy v1
 installation record must be reprovisioned by the protected receiver under
 reviewed authority; it is never silently upgraded or adopted. This does not
 delete retained archive content or pin metadata.
+
+### Signed revocation and interrupted replay hardening
+
+The archive-specific private store can now consume a **verified signed
+revocation** through `apply_signed_revocation(...)`. The protected receiver
+must use its independently pinned Credential Authority public key, advance its
+durable canonical authorization/replay ledger first, and then call this local
+adapter. The archive adapter checks exact purpose/Host/installation/STATE
+binding, installed authorization identity and monotonic revision, and atomically
+persists a secret-free `0600` revocation marker. Repeated identical revocation
+is idempotent; stale/conflicting revocations fail closed. A revoked installed
+credential cannot be opened, replayed or renewed through the archive adapter.
+It is never a mechanism for deleting archive objects or pins.
+
+Exact-delivery replays also check the installed secret bytes, and an unresolved
+pending installation with a different delivery ID blocks replay rather than
+being reported as success. A crash after metadata commit but before pending
+cleanup can be reconciled only using the same verified delivery.
+
+This is a local **source contract**, not evidence that the native protected
+HTTPS receiver has been deployed or wired to invoke it. An already-open secret
+file descriptor cannot be retroactively withdrawn; callers must not cache
+provider secrets across role/revocation checks.

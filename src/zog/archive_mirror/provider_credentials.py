@@ -9,6 +9,7 @@ Provider secrets are separate from short-lived archive consumer JWT grants.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import secrets
@@ -24,6 +25,7 @@ from .store import named_lock, sync_directory
 
 INSTALL_SCHEMA = "zog-archive-provider-credential-installation-v2"
 PENDING_SCHEMA = "zog-archive-provider-credential-pending-v2"
+REVOCATION_SCHEMA = "zog-archive-provider-credential-revocation-v1"
 
 
 class ProviderCredentialError(ValueError):
@@ -60,6 +62,26 @@ def _private_root():
 def _names(selected):
     stem=selected["scope_id"]
     return stem+".secret",stem+".json",stem+".pending.json"
+
+
+def _revocation_name(selected):
+    return selected["scope_id"]+".revoked.json"
+
+
+def _reject_revoked(directory,selected):
+    # The protected receiver installs only signed, approved revocations.
+    # Presence is permanently disabling, even if the record is damaged.
+    if _read_json(directory,_revocation_name(selected),missing_ok=True) is not None:
+        _deny("archive provider authorization revoked")
+
+
+def _clear_pending(directory,name):
+    dfd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        os.unlink(name,dir_fd=dfd)
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
 
 
 def _read_json(directory,name,*,missing_ok=False):
@@ -223,8 +245,16 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
     expected=_installation(selected,authorization,delivery,now=moment)
     with named_lock("provider-credential",selected["scope_id"]):
         _active_role(selected)
+        _reject_revoked(directory,selected)
         old=_read_json(directory,record_name,missing_ok=True)
         pending=_read_json(directory,pending_name,missing_ok=True)
+        if pending is not None and (
+            pending.get("schema") != PENDING_SCHEMA
+            or pending.get("scope_id") != selected["scope_id"]
+            or pending.get("delivery_id") != delivery["delivery_id"]
+            or pending.get("credential_revision") != selected["credential_revision"]
+        ):
+            _deny("provider credential installation recovery required")
         if old is not None:
             if old.get("schema") != INSTALL_SCHEMA:
                 _deny("invalid provider credential installation record")
@@ -237,8 +267,15 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
                 _deny("provider credential revision rollback")
             if old_revision==selected["credential_revision"]:
                 if _matching(old,expected):
-                    fd=_secret_file_ok(directory,secret_name);os.close(fd)
-                    return {**expected,"status":"installed","replayed":True}
+                    fd=_secret_file_ok(directory,secret_name)
+                    with os.fdopen(fd,"rb") as installed:
+                        if not hmac.compare_digest(installed.read(),secret):
+                            _deny("provider credential replay bytes differ")
+                    if pending is not None:
+                        # Crash after record publication but before pending
+                        # cleanup: only the exact same delivery may recover.
+                        _clear_pending(directory,pending_name)
+                    return {**old,"status":"installed","replayed":True}
                 _deny("provider credential revision conflict")
             if (
                 request_value.get("action") != "renew"
@@ -247,13 +284,6 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
                 _deny("provider credential rotation is not chained")
         elif request_value.get("action") != "deliver":
             _deny("initial provider credential must use deliver")
-        if pending is not None and (
-            pending.get("schema") != PENDING_SCHEMA
-            or pending.get("scope_id") != selected["scope_id"]
-            or pending.get("delivery_id") != delivery["delivery_id"]
-            or pending.get("credential_revision") != selected["credential_revision"]
-        ):
-            _deny("provider credential installation recovery required")
         _atomic_json(directory,pending_name,{
             "schema":PENDING_SCHEMA,
             "scope_id":selected["scope_id"],
@@ -306,6 +336,7 @@ def open_for(scope,*,operation,collection):
     _active_role(selected)
     directory=_private_root()
     secret_name,record_name,pending_name=_names(selected)
+    _reject_revoked(directory,selected)
     if _read_json(directory,pending_name,missing_ok=True) is not None:
         _deny("provider credential installation pending")
     expected=_read_json(directory,record_name)
@@ -326,6 +357,7 @@ def open_for(scope,*,operation,collection):
     fd=_secret_file_ok(directory,secret_name)
     try:
         _active_role(selected)
+        _reject_revoked(directory,selected)
     except Exception:
         os.close(fd);raise
     return os.fdopen(fd,"rb")
@@ -336,6 +368,10 @@ def inspect(scope):
     selected=archive_credentials.provider_scope(scope)
     directory=_private_root()
     secret_name,record_name,pending_name=_names(selected)
+    revoked=_read_json(directory,_revocation_name(selected),missing_ok=True)
+    if revoked is not None:
+        return {"schema":INSTALL_SCHEMA,"status":"blocked",
+                "scope_id":selected["scope_id"],"reason":"authorization-revoked"}
     pending=_read_json(directory,pending_name,missing_ok=True)
     if pending is not None:
         return {"schema":INSTALL_SCHEMA,"status":"blocked","scope_id":selected["scope_id"],
@@ -367,3 +403,63 @@ def inspect(scope):
         "role_revision":record.get("role_revision"),
         "delivery_id":record.get("delivery_id"),
     }
+
+
+def apply_signed_revocation(
+    scope,envelope,authority_key,*,expected_issuer,now=None,
+):
+    """Persist a signed, purpose/Host-bound revocation from the protected receiver.
+
+    The caller must supply the independently pinned Credential Authority public
+    key and first durably accept the revocation in the common ledger. This
+    adapter never obtains authority from a caller-chosen key or a role lease.
+    Revocation disables use/rotation but does not delete archive content.
+    """
+    selected=archive_credentials.provider_scope(scope)
+    moment=time.time() if now is None else float(now)
+    authorization=archive_credentials.verify_provider_authorization(
+        envelope,authority_key,expected_issuer=expected_issuer,
+        scope=scope,now=moment,
+    )
+    if authorization["status"]!="revoked":
+        _deny("signed archive provider authorization is not revoked")
+    record={
+        "schema":REVOCATION_SCHEMA,
+        "scope_id":selected["scope_id"],
+        **{key:selected[key] for key in _IDENTITY_FIELDS},
+        "credential_id":selected["credential_id"],
+        "credential_revision":authorization["credential_revision"],
+        "authorization_id":authorization["authorization_id"],
+        "authorization_revision":authorization["revision"],
+        "revoked_at":authorization["revoked_at"],
+    }
+    directory=_private_root()
+    with named_lock("provider-credential",selected["scope_id"]):
+        previous=_read_json(
+            directory,_revocation_name(selected),missing_ok=True,
+        )
+        if previous is not None:
+            if previous==record:
+                return {"schema":REVOCATION_SCHEMA,
+                        "status":"revoked","replayed":True,
+                        "scope_id":selected["scope_id"]}
+            _deny("conflicting provider authorization revocation")
+        installed=_read_json(
+            directory,_names(selected)[1],missing_ok=True,
+        )
+        if installed is not None:
+            if (
+                installed.get("schema")!=INSTALL_SCHEMA
+                or not _record_identity_matches(installed,selected)
+                or installed.get("authorization_id")!=authorization["authorization_id"]
+            ):
+                _deny("provider revocation does not match installed authority")
+            if (
+                authorization["revision"]<=installed.get("authorization_revision",0)
+                or authorization["credential_revision"]<
+                    installed.get("credential_revision",0)
+            ):
+                _deny("stale provider authorization revocation")
+        _atomic_json(directory,_revocation_name(selected),record)
+    return {"schema":REVOCATION_SCHEMA,"status":"revoked",
+            "replayed":False,"scope_id":selected["scope_id"]}
