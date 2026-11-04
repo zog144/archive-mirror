@@ -246,3 +246,78 @@ class ApplicationFdTests(TestCase):
             with self.assertRaises(appfd.ApplicationFdHold):
                 appfd.validate_sealed_memfd(fd)
         finally:os.close(fd)
+
+    def test_no_second_fd_even_for_identical_completed_delivery(self):
+        first=self.send_once()
+        self.assertEqual(first["status"],"installed-unattested")
+        before=(self.root/"provider-credentials"/
+                (self.policy["scope_id"]+".secret")).stat().st_ino
+        with self.assertRaises(appfd.ApplicationFdHold):
+            self.send_once()
+        self.assertEqual((self.root/"provider-credentials"/
+                          (self.policy["scope_id"]+".secret")).stat().st_ino,before)
+
+    def test_pending_fd_installation_blocks_redelivery_even_with_same_delivery(self):
+        self.send_once()
+        directory=self.root/"provider-credentials"
+        marker=directory/(self.policy["scope_id"]+".pending.json")
+        marker.write_text(json.dumps({
+            "schema":provider_credentials.PENDING_SCHEMA,
+            "scope_id":self.policy["scope_id"],
+            "credential_id":self.auth["credential_id"],
+            "credential_revision":self.auth["credential_revision"],
+            "delivery_id":self.delivery["delivery_id"],
+        }))
+        marker.chmod(0o600)
+        with self.assertRaises(appfd.ApplicationFdHold):
+            self.send_once()
+        self.assertTrue(marker.exists())
+
+    def test_fd_renewal_is_chained_and_old_revision_cannot_be_used(self):
+        self.send_once()
+        previous=self.delivery["delivery_id"]
+        self.scope={**self.scope,"credential_revision":4}
+        self.auth,self.request,self.delivery=ProviderCredentialTests.exchange(
+            self,secret=b"synthetic-rotated-provider",
+            scope=self.scope,action="renew",previous_delivery_id=previous,
+        )
+        self.metadata={
+            **{k:v for k,v in self.delivery.items()
+               if k not in ("secret","secret_format")},
+            "schema":appfd.METADATA_SCHEMA,
+        }
+        self.policy["credential_revision"]=4
+        self.state={"status":"installing","request_id":self.request["request_id"],
+                    "delivery_id":self.delivery["delivery_id"],"revoked":False}
+        receipt=self.send_once(secret=b"synthetic-rotated-provider")
+        self.assertEqual(receipt["credential_revision"],4)
+        with provider_credentials.open_for(
+            self.scope,operation="fetch",collection="sources",
+        ) as stored:
+            self.assertEqual(stored.read(),b"synthetic-rotated-provider")
+        with self.assertRaises(appfd.ApplicationFdHold):
+            self.send_once(secret=b"synthetic-rotated-provider")
+
+    def test_role_withdrawal_disables_fd_and_keeps_private_archive_state(self):
+        self.send_once()
+        private=self.root/"provider-credentials"/(self.policy["scope_id"]+".secret")
+        old=private.read_bytes()
+        self.set_role(selected=False,revision=8)
+        with self.assertRaises(appfd.ApplicationFdHold):
+            self.send_once()
+        with self.assertRaises(provider_credentials.ProviderCredentialError):
+            provider_credentials.open_for(
+                self.scope,operation="fetch",collection="sources",
+            )
+        self.assertEqual(private.read_bytes(),old)
+
+    def test_fd_only_setting_refuses_legacy_in_memory_path(self):
+        with patch.dict(os.environ,{"ARCHIVE_MIRROR_CREDENTIAL_FD_ONLY":"1"}):
+            with self.assertRaisesRegex(
+                provider_credentials.ProviderCredentialError,"in-memory",
+            ):
+                provider_credentials.install_verified(
+                    self.scope,self.auth,self.request,self.delivery,
+                )
+            result=self.send_once()
+        self.assertEqual(result["status"],"installed-unattested")
