@@ -127,3 +127,34 @@ class ProviderFDTests(ProviderCredentialTests):
         proc.start();child.close()
         proc.join(8);parent.close()
         self.assertEqual(proc.exitcode,0)
+
+    def test_separate_nonroot_application_process_publishes_private_installation(self):
+        # Child holds the sealed descriptor and writes private archive storage.
+        # Parent observes only a secret-free result. Peer root authentication
+        # remains deliberately absent: no sender/receiver native installation.
+        item=self.admission(secret=b"child-synthetic-secret")
+        fd=self.make_fd(b"child-synthetic-secret")
+        ctx=multiprocessing.get_context("fork")
+        listener,child_pipe=ctx.Pipe(duplex=False)
+        def worker(pipe):
+            try:
+                result=adapter.install_verified_fd(
+                    item,fd,protected_scope=self.scope,
+                    expected_uid=os.geteuid(),expected_gid=os.getegid(),
+                    enabled=True)
+                pipe.send(result)
+            except Exception as error:
+                pipe.send({"error":type(error).__name__})
+            finally:
+                os.close(fd);pipe.close()
+        proc=ctx.Process(target=worker,args=(child_pipe,))
+        proc.start();child_pipe.close();os.close(fd)
+        self.assertTrue(listener.poll(8),"child application owner did not respond")
+        outcome=listener.recv();listener.close()
+        proc.join(8)
+        self.assertEqual(proc.exitcode,0)
+        self.assertNotIn("error",outcome)
+        self.assertEqual(outcome["status"],"installed-receipt-pending")
+        self.assertNotIn("child-synthetic-secret",json.dumps(outcome))
+        with private.open_for(self.scope,operation="fetch",collection="sources") as source:
+            self.assertEqual(source.read(),b"child-synthetic-secret")
