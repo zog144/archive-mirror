@@ -1,0 +1,55 @@
+name: Disabled archive provider application FD source acceptance
+on:
+  push:
+    branches: [review/application-owned-provider-fd-20261104]
+  pull_request:
+    paths:
+      - src/zog/archive_mirror/provider_credential_fd.py
+      - tests/test_provider_credential_fd.py
+      - .github/workflows/archive-provider-fd-source.yml
+permissions:
+  contents: read
+jobs:
+  application-fd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12','3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: zog144/host-identify
+          ref: 59dbc181f54c6ac29ee5eb1f83b6f322fb73c037
+          path: .ci-host-identify
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install pinned companion and source tests
+        run: |
+          test "$(id -u)" -ne 0
+          test "$(git -C .ci-host-identify rev-parse HEAD)" = 59dbc181f54c6ac29ee5eb1f83b6f322fb73c037
+          python -m pip install 'setuptools>=80,<83' 'Django>=5.2,<5.3' 'PyJWT>=2.10,<3' 'cryptography>=44' 'pytest>=8,<10'
+          python -m pip install --no-build-isolation ./.ci-host-identify .
+          python -m pip check
+      - name: Synthetic application FD, nonroot process and revocation
+        env:
+          DJANGO_SETTINGS_MODULE: tests.settings
+        run: |
+          python -m compileall -q src tests
+          python - <<'PY'
+          import os,django
+          from django.test.runner import DiscoverRunner
+          assert os.geteuid()!=0 and os.getegid()!=0
+          django.setup()
+          runner=DiscoverRunner(verbosity=2)
+          raise SystemExit(runner.run_tests(["tests"]))
+          PY
+      - name: No native listener
+        if: always()
+        run: echo 'No real secret, socket service, root peer, STATE, provider access or credential authority installed.' >> "$GITHUB_STEP_SUMMARY"
