@@ -48,7 +48,7 @@ jobs:
           assert os.geteuid()!=0 and os.getegid()!=0
           django.setup()
           runner=DiscoverRunner(verbosity=2)
-          raise SystemExit(runner.run_tests(["tests.test_provider_credential_fd"]))
+          raise SystemExit(runner.run_tests(["tests"]))
           PY
       - name: No native listener
         if: always()
