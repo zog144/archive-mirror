@@ -271,7 +271,8 @@ def receive_verified_fd(
         # invariants; the sealed FD never becomes an in-memory delivery secret.
         from .provider_credentials import install_verified_fd
         result=install_verified_fd(
-            scope,authorization,request,delivery_metadata,fds[0],now=moment)
+            scope,authorization,request,delivery_metadata,fds[0],
+            now=moment,enabled=True)
         if (result.get("status")!="installed"
                 or result.get("scope_id")!=policy["scope_id"]
                 or result.get("delivery_id")!=transfer["delivery_id"]):
