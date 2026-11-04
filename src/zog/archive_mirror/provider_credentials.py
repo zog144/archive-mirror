@@ -225,13 +225,9 @@ def _secret_file_ok(directory,name):
 
 
 def install_verified(scope,authorization,request_value,delivery,*,now=None):
-    """Install one already signature-verified canonical delivery atomically.
-
-    The common protected receiver owns authority-pin verification, signed HTTPS,
-    nonce/replay persistence and signed installation receipt. This function owns
-    only archive-specific scope/role checks and the application-private file.
-    """
-    selected=archive_credentials.provider_scope(scope)
+    """Legacy in-memory verified-delivery path; never a native FD receiver."""
+    if os.environ.get("ARCHIVE_MIRROR_CREDENTIAL_FD_ONLY") == "1":
+        _deny("in-memory provider credential installation disabled")
     moment=time.time() if now is None else float(now)
     archive_credentials.validate_delivery(
         scope,authorization,request_value,delivery,now=moment
@@ -239,6 +235,47 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
     secret=credential_delivery.secret_bytes(delivery)
     if not 1<=len(secret)<=credential_delivery.MAX_SECRET:
         _deny("invalid provider credential bytes")
+    return _install_from_source(
+        scope,authorization,request_value,delivery,
+        byte_count=len(secret),
+        read_chunk=lambda offset,length:secret[offset:offset+length],
+        now=moment,
+    )
+
+
+def install_verified_fd(
+    scope,authorization,request_value,delivery_metadata,fd,*,now=None,
+    enabled=False,
+):
+    """Application-identity installation from one already-verified sealed FD.
+
+    No shared byte buffer, delivery with secret field, or caller path. The native
+    protected receiver remains responsible for authority signature, replay
+    ledger, independent identity and installation acknowledgement.
+    """
+    if enabled is not True:
+        _deny("archive provider FD installation disabled")
+    from .provider_fd_adapter import validate_sealed_memfd, validate_delivery_metadata
+    moment=time.time() if now is None else float(now)
+    validate_delivery_metadata(
+        scope,authorization,request_value,delivery_metadata,now=moment,
+    )
+    byte_count=validate_sealed_memfd(fd)
+    return _install_from_source(
+        scope,authorization,request_value,delivery_metadata,
+        byte_count=byte_count,
+        read_chunk=lambda offset,length:os.pread(fd,length,offset),
+        now=moment,allow_redelivery=False,
+    )
+
+
+def _install_from_source(
+    scope,authorization,request_value,delivery,*,byte_count,read_chunk,now,
+    allow_redelivery=True,
+):
+    """One crash/revision/revocation-aware store path for bytes and sealed FD."""
+    selected=archive_credentials.provider_scope(scope)
+    moment=now
     _active_role(selected)
     directory=_private_root()
     secret_name,record_name,pending_name=_names(selected)
@@ -248,6 +285,8 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
         _reject_revoked(directory,selected)
         old=_read_json(directory,record_name,missing_ok=True)
         pending=_read_json(directory,pending_name,missing_ok=True)
+        if pending is not None and not allow_redelivery:
+            _deny("provider FD handoff uncertain; no redelivery")
         if pending is not None and (
             pending.get("schema") != PENDING_SCHEMA
             or pending.get("scope_id") != selected["scope_id"]
@@ -266,11 +305,19 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
             if old_revision>selected["credential_revision"]:
                 _deny("provider credential revision rollback")
             if old_revision==selected["credential_revision"]:
+                if not allow_redelivery:
+                    _deny("provider FD already delivered; no redelivery")
                 if _matching(old,expected):
                     fd=_secret_file_ok(directory,secret_name)
                     with os.fdopen(fd,"rb") as installed:
-                        if not hmac.compare_digest(installed.read(),secret):
+                        if os.fstat(installed.fileno()).st_size != byte_count:
                             _deny("provider credential replay bytes differ")
+                        for offset in range(0,byte_count,4096):
+                            length=min(4096,byte_count-offset)
+                            part=read_chunk(offset,length)
+                            if (len(part)!=length or not hmac.compare_digest(
+                                    os.pread(installed.fileno(),length,offset),part)):
+                                _deny("provider credential replay bytes differ")
                     if pending is not None:
                         # Crash after record publication but before pending
                         # cleanup: only the exact same delivery may recover.
@@ -300,11 +347,16 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
             )
             try:
                 os.fchmod(fd,0o600)
-                remaining=memoryview(secret)
-                while remaining:
-                    written=os.write(fd,remaining)
-                    if written<=0:_deny("incomplete provider credential write")
-                    remaining=remaining[written:]
+                for offset in range(0,byte_count,4096):
+                    length=min(4096,byte_count-offset)
+                    part=read_chunk(offset,length)
+                    if len(part)!=length:
+                        _deny("incomplete provider credential input")
+                    remaining=memoryview(part)
+                    while remaining:
+                        written=os.write(fd,remaining)
+                        if written<=0:_deny("incomplete provider credential write")
+                        remaining=remaining[written:]
                 os.fsync(fd)
             finally:
                 os.close(fd)
