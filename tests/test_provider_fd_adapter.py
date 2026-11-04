@@ -321,3 +321,16 @@ class ApplicationFdTests(TestCase):
                 )
             result=self.send_once()
         self.assertEqual(result["status"],"installed-unattested")
+
+    def test_internal_fd_store_is_also_disabled_without_selected_reception(self):
+        fd=sealed_secret(self.secret)
+        try:
+            with self.assertRaisesRegex(
+                provider_credentials.ProviderCredentialError,"disabled",
+            ):
+                provider_credentials.install_verified_fd(
+                    self.scope,self.auth,self.request,self.metadata,fd,
+                )
+        finally:
+            os.close(fd)
+        self.assertFalse((self.root/"provider-credentials").exists())
