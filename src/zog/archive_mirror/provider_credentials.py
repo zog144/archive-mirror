@@ -245,6 +245,7 @@ def install_verified(scope,authorization,request_value,delivery,*,now=None):
 
 def install_verified_fd(
     scope,authorization,request_value,delivery_metadata,fd,*,now=None,
+    enabled=False,
 ):
     """Application-identity installation from one already-verified sealed FD.
 
@@ -252,6 +253,8 @@ def install_verified_fd(
     protected receiver remains responsible for authority signature, replay
     ledger, independent identity and installation acknowledgement.
     """
+    if enabled is not True:
+        _deny("archive provider FD installation disabled")
     from .provider_fd_adapter import validate_sealed_memfd, validate_delivery_metadata
     moment=time.time() if now is None else float(now)
     validate_delivery_metadata(
