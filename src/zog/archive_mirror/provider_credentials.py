@@ -262,12 +262,13 @@ def install_verified_fd(
         scope,authorization,request_value,delivery_metadata,
         byte_count=byte_count,
         read_chunk=lambda offset,length:os.pread(fd,length,offset),
-        now=moment,
+        now=moment,allow_redelivery=False,
     )
 
 
 def _install_from_source(
     scope,authorization,request_value,delivery,*,byte_count,read_chunk,now,
+    allow_redelivery=True,
 ):
     """One crash/revision/revocation-aware store path for bytes and sealed FD."""
     selected=archive_credentials.provider_scope(scope)
@@ -281,6 +282,8 @@ def _install_from_source(
         _reject_revoked(directory,selected)
         old=_read_json(directory,record_name,missing_ok=True)
         pending=_read_json(directory,pending_name,missing_ok=True)
+        if pending is not None and not allow_redelivery:
+            _deny("provider FD handoff uncertain; no redelivery")
         if pending is not None and (
             pending.get("schema") != PENDING_SCHEMA
             or pending.get("scope_id") != selected["scope_id"]
@@ -299,6 +302,8 @@ def _install_from_source(
             if old_revision>selected["credential_revision"]:
                 _deny("provider credential revision rollback")
             if old_revision==selected["credential_revision"]:
+                if not allow_redelivery:
+                    _deny("provider FD already delivered; no redelivery")
                 if _matching(old,expected):
                     fd=_secret_file_ok(directory,secret_name)
                     with os.fdopen(fd,"rb") as installed:
