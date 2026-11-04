@@ -53,6 +53,9 @@ def sender_process(path,payload,data,mode):
 
 
 class ApplicationFdTests(TestCase):
+    # Reuse the existing provider-role fixture without inheriting its tests.
+    set_role = ProviderCredentialTests.set_role
+
     def setUp(self):
         ProviderCredentialTests.setUp(self)
         self.secret=b"synthetic-provider-secret"
