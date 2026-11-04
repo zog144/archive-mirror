@@ -72,9 +72,14 @@ def _validate(admission, *, protected_scope, expected_uid, expected_gid):
     delivery=admission["delivery"]
     if type(auth) is not dict or type(request) is not dict or type(delivery) is not dict:
         _hold("missing canonical nonsecret evidence")
-    if ("secret" in delivery or "secret_format" in delivery or
-            any(k in admission for k in ("token","credential","secret"))):
-        _hold("provider secret must only travel by FD")
+    # Fail closed on ANY additional field: otherwise an untrusted message
+    # could smuggle bytes into apparently nonsecret JSON metadata.
+    delivery_fields={"schema","request_id","delivery_id","authorization_id",
+                     "authorization_revision","credential_id",
+                     "credential_revision","consumer","purpose","issued_at",
+                     "expires_at"}
+    if set(delivery)!=delivery_fields:
+        _hold("credential bytes or unreviewed fields in IPC metadata")
     if cd.binding(auth)!=archive.provider_binding(protected_scope):
         _hold("wrong canonical archive authorization")
     if (auth.get("status")!="approved"
@@ -89,6 +94,11 @@ def _validate(admission, *, protected_scope, expected_uid, expected_gid):
             or delivery.get("consumer")!=CONSUMER or delivery.get("purpose")!=PURPOSE
             or delivery.get("schema")!=cd.DELIVERY_SCHEMA):
         _hold("delivery differs from signed owner claim")
+    if (type(delivery["issued_at"]) is not int or
+            type(delivery["expires_at"]) is not int or
+            delivery["issued_at"]>=delivery["expires_at"] or
+            delivery["expires_at"]-delivery["issued_at"]>cd.DELIVERY_LIFETIME):
+        _hold("invalid canonical archive delivery window")
     fence=admission["owner_fence"]
     if (type(fence) is not dict or set(fence)!={"status","request_id","delivery_id",
                                                "revoked","scope_id","authorization_revision"}
